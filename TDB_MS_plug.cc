@@ -14,11 +14,11 @@
 
 using namespace std;
 
-#define REG_CHAN "RTS_registration_channel"
-const int REG_TYPE = 101; //				тип сообщения для регистрации
-bool DEBUG = true;
 bool ShutDown = false;
 volatile sig_atomic_t stop_thread = 0;
+
+#define REG_CHAN "RTS_registration_channel"
+const int REG_TYPE = 101; //				тип сообщения для регистрации
 const char *nodename = "localnode";
 
 int tik_count = 0;//	Счетчик тиков
@@ -29,21 +29,36 @@ int mainPid = getpid();
 typedef struct _pulse msg_header_t; // абстрактный тип для заголовка сообщения как у импульса
 typedef struct _reg_data {
 	msg_header_t hdr;
-	string name; // имя СУБТД
-	int pid; // 	id процесса
-	int tid; // 	id таймера
+	string name; // 	имя СУБТД
+	int pid; // 		id процесса
+	pthread_t tid; // 	id нити
 	int nd;
 } reg_msg_t;
 
-static void* realTimeServiceRegistration(void*);//						Заглушка. Имитирует СУБТД посылающую запрос на регистрацию
-static void handler(int sig);//						Обработчик сигнала SignalKill
+static void* realTimeServiceRegistration(void* arg);//	функция регистрации
+static void handler(int sig);//	Обработчик сигнала SignalKill
 
 
-int main() {
-	cout << "MainPid: " << mainPid << endl;
+/*
+ * argc:
+ * [1] - path
+ * [2] - порядковывй номер tdb
+ */
+int main(int argc, char* argv[]) {
+	if (argc < 2) {
+		cerr << "Usage: " << argv[0] << " <number>" << endl;
+		return EXIT_FAILURE;
+	}
 
-	if ((pthread_create(NULL, NULL, &realTimeServiceRegistration, NULL)) != EOK) {
-		perror("Main: 	ошибка создания нити\n");
+	cout << "TDB_MS_plug IS RUNNING" << endl;
+	cout << "arg: "<< argv[0] << endl;
+	cout << "arg: "<< argv[1] << endl;
+
+	cout << "TDB: запуск нити регистрации" << endl;
+	pthread_t thread_id;
+	if ((pthread_create(&thread_id, NULL, &realTimeServiceRegistration, argv[1]))
+			!= EOK) {
+		perror("TDB_MS_plug: 	ошибка создания нити\n");
 		exit(EXIT_FAILURE);
 	};
 
@@ -52,49 +67,51 @@ int main() {
 	}
 }
 
-//-------------------------------------------------------
-//*****************Заглушка******************************
-//-------------------------------------------------------
-static void* realTimeServiceRegistration(void*) {
-	if (DEBUG) {
-		printf("Client debug: Client is running...\n");
-	}
+/**
+ * Функция регистрации СУБТД в СРВ
+ */
+static void* realTimeServiceRegistration(void* arg) {
+	printf("Registration: запущена\n");
 
 	// Установка обработчика сигнала
 	signal(SIGUSR1, handler);
-
 	reg_msg_t msg;
 
-	/* Заголовок сообщения клиента */
+	const char* tdb_id = (const char*) arg; // преобразование аргумента
+
+	/* Заголовок сообщения */
 	msg.hdr.type = 0x00;
 	msg.hdr.subtype = 0x00;
 	msg.hdr.code = REG_TYPE;
 
-	msg.name = "TemporalDB_MS_1";
+	msg.name = "TDB_MS_";
+	msg.name += tdb_id;
 	msg.pid = getpid();
-	msg.tid = gettid();
-//	int nd = netmgr_strtond(nodename, NULL);
-//	if (nd == -1) {
-//		perror("ошибка получения дескриптора узла");
-//		exit(EXIT_FAILURE);
-//	}
-//	msg.nd = nd;
+	msg.tid = pthread_self();
+	;
+	//	int nd = netmgr_strtond(nodename, NULL);
+	//	if (nd == -1) {
+	//		perror("ошибка получения дескриптора узла");
+	//		exit(EXIT_FAILURE);
+	//	}
+	//	msg.nd = nd;
 	msg.nd = 0;
-
-	cout << endl << "Registration	  	: ----msg---" << endl;
-	cout << "Registration		: 	Name		: " << msg.name << endl;
-	cout << "Registration		: 	Process ID 	: " << msg.pid << endl;
-	cout << "Registration	  	: 	Thread ID 	:  " << msg.tid << endl;
-	cout << "Registration	  	: 	 ND	 		:  " << msg.nd << endl << endl;
-	cout << "Registration	  	: ----msg---" << endl << endl;
+	cout << endl;
+	cout << "Registration: ----msg--- " << endl;
+	cout << "Registration: 	Name	: " << msg.name<< endl;
+	cout << "Registration: 	PID 	: " << msg.pid << endl;
+	cout << "Registration: 	TID 	: " << msg.tid << endl;
+	cout << "Registration: 	ND	 	: " << msg.nd  << endl;
+	cout << "Registration: ----msg--- " << endl;
+	cout << endl;
 
 	int server_coid = -1;
-
+	// попытки подключения
 	while (server_coid == -1) {
 		if ((server_coid = name_open(REG_CHAN, 0)) == -1) {
-			cout << "Client 	: ошибка подключения к серверу регистрации\n";
+			cout << "Registration: ошибка подключения к серверу регистрации\n";
 		}
-		sleep(3);
+		sleep(1);
 	}
 
 	cout << "Client		: отправка данных для регистрации БТД" << endl;
@@ -103,7 +120,6 @@ static void* realTimeServiceRegistration(void*) {
 
 	/* Закрыть соединение с сервером */
 	//	name_close(server_coid);
-
 
 	while (!stop_thread) {
 	}
