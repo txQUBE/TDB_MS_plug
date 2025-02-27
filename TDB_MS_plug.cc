@@ -1,3 +1,6 @@
+/*
+ * Модуль имитации СУБТД
+ */
 #include <stdio.h>
 #include <iostream>
 #include <errno.h>
@@ -14,8 +17,8 @@
 
 using namespace std;
 
-bool ShutDown = false;
-volatile sig_atomic_t stop_thread = 0;
+bool shutDown = false;
+bool stopChronometer = false;
 
 #define REG_CHAN "RTS_registration_channel"
 const int REG_TYPE = 101; //				тип сообщения для регистрации
@@ -23,9 +26,7 @@ const char *nodename = "localnode";
 
 int tik_count = 0;//	Счетчик тиков
 
-int mainPid = getpid();
-
-//************Структура для запроса на регистрацию********
+//Структура для запроса на регистрацию
 typedef struct _pulse msg_header_t; // абстрактный тип для заголовка сообщения как у импульса
 typedef struct _reg_data {
 	msg_header_t hdr;
@@ -35,14 +36,24 @@ typedef struct _reg_data {
 	int nd;
 } reg_msg_t;
 
-static void* realTimeServiceRegistration(void* arg);//	функция регистрации
-static void handler(int sig);//	Обработчик сигнала SignalKill
+//Прототипы функций
+static void* ChronometrService(void* arg);// нить хронометра СУБТД
+void startChronometer(); // Функция запуска нити хронометра СУБТД
+static void tick_handler(int sig);// Обработчик сигнала об истечении тика таймера
+static void dead_handler(int sig);// Обработчик сигнала завершения процесса
 
+string tdb_name;
 
 /*
- * argc:
- * [1] - path
- * [2] - порядковывй номер tdb
+ * Основная нить main
+ * 		Формирует имя СУБТД
+ * 		Запускает нить регистрации в СРВ,
+ * 			эта же нить получает сигналы СРВ об истечении тика таймера
+ * 		Имеет меню для управления
+ *
+ * Аргументы:
+ * [0] - path
+ * [1] - порядковывй номер tdb для формирования имени
  */
 int main(int argc, char* argv[]) {
 	if (argc < 2) {
@@ -50,87 +61,134 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	cout << "TDB_MS_plug IS RUNNING" << endl;
-	cout << "arg: "<< argv[0] << endl;
-	cout << "arg: "<< argv[1] << endl;
+	tdb_name = "TDB_MS_plug_" + string(argv[1]);
 
-	cout << "TDB: запуск нити регистрации" << endl;
+	cout << tdb_name << " starting..." << endl;
 	pthread_t thread_id;
-	if ((pthread_create(&thread_id, NULL, &realTimeServiceRegistration, argv[1]))
-			!= EOK) {
-		perror("TDB_MS_plug: 	ошибка создания нити\n");
+	if ((pthread_create(&thread_id, NULL, &ChronometrService, NULL)) != EOK) {
+		cerr << tdb_name << ": error reg thread launch" << endl;
 		exit(EXIT_FAILURE);
 	};
 
-	while (!ShutDown) {
-
+	while (!shutDown) {
+		int input;
+		cin >> input;
+		switch (input) {
+		// Запустить нить хронометра
+		case 1:{
+			stopChronometer = false;
+			startChronometer();
+			break;
+		}
+		// Остановить нить хронометра
+		case 2:
+			stopChronometer = true;
+			break;
+		// Завершить процесс
+		case 9:
+			shutDown = true;
+			break;
+		}
 	}
 }
 
 /**
- * Функция регистрации СУБТД в СРВ
+ * Нить локальных часов СУБТД
+ * Регистрируется в сервере СРВ
+ * Принимает сигналы о прошедших тиках часов СРВ
  */
-static void* realTimeServiceRegistration(void* arg) {
-	printf("Registration: запущена\n");
+static void* ChronometrService(void*) {
+	printf("Registration: starting...\n");
 
 	// Установка обработчика сигнала
-	signal(SIGUSR1, handler);
-	reg_msg_t msg;
+	signal(SIGUSR1, tick_handler);
+	// Установка обработчика для SIGUSR2
+	signal(SIGUSR2, dead_handler);
 
-	const char* tdb_id = (const char*) arg; // преобразование аргумента
+	reg_msg_t msg;
 
 	/* Заголовок сообщения */
 	msg.hdr.type = 0x00;
 	msg.hdr.subtype = 0x00;
 	msg.hdr.code = REG_TYPE;
 
-	msg.name = "TDB_MS_";
-	msg.name += tdb_id;
+	msg.name = tdb_name;
 	msg.pid = getpid();
 	msg.tid = pthread_self();
-	;
+	msg.nd = 0;
+
 	//	int nd = netmgr_strtond(nodename, NULL);
 	//	if (nd == -1) {
 	//		perror("ошибка получения дескриптора узла");
 	//		exit(EXIT_FAILURE);
 	//	}
 	//	msg.nd = nd;
-	msg.nd = 0;
+
+
 	cout << endl;
 	cout << "Registration: ----msg--- " << endl;
-	cout << "Registration: 	Name	: " << msg.name<< endl;
-	cout << "Registration: 	PID 	: " << msg.pid << endl;
-	cout << "Registration: 	TID 	: " << msg.tid << endl;
-	cout << "Registration: 	ND	 	: " << msg.nd  << endl;
+	cout << "Registration: 	Name: " << msg.name << endl;
+	cout << "Registration: 	PID : " << msg.pid << endl;
+	cout << "Registration: 	TID : " << msg.tid << endl;
+	cout << "Registration: 	ND	: " << msg.nd << endl;
 	cout << "Registration: ----msg--- " << endl;
 	cout << endl;
 
-	int server_coid = -1;
 	// попытки подключения
+	int server_coid = -1;
 	while (server_coid == -1) {
 		if ((server_coid = name_open(REG_CHAN, 0)) == -1) {
-			cout << "Registration: ошибка подключения к серверу регистрации\n";
+			cerr << "Registration: error name_open(REG_CHAN) errno: " << errno
+					<< endl;
 		}
 		sleep(1);
 	}
 
-	cout << "Client		: отправка данных для регистрации БТД" << endl;
-	MsgSend(server_coid, &msg, sizeof(msg), NULL, 0);
-	cout << "Данные отправлены\n";
+	cout << "Registration: sending registration data" << endl;
+	int reply = MsgSend(server_coid, &msg, sizeof(msg), NULL, 0);
+	switch(reply){
+	case EOK:
+		cout << tdb_name << " Success registration" << endl;
+		break;
+	case EINVAL:
+		cout << tdb_name << " Registration error" << endl;
+		break;
+	default:
+		cerr << "code " << errno;
+		break;
+	}
 
 	/* Закрыть соединение с сервером */
-	//	name_close(server_coid);
+	name_close(server_coid);
 
-	while (!stop_thread) {
+	// нить выполняется до принудительного завершения
+	while (!stopChronometer) {
+		// Имитация работы, нужна чтобы нить проверяла значение stopChronometer
+		sleep(1);
 	}
+
+	cout << "Registration: EXIT" << endl;
 
 	return EXIT_SUCCESS;
 }
 
-void handler(int sig) {
+void tick_handler(int sig) {
 	if (sig == SIGUSR1) {
 		tik_count++;
-		cout << "handler	: получен SIGUSR1 !!!" << endl;
-		//		stop_thread = 1;
+		cout << tdb_name << " handler	: recieve SIGUSR1 !!!" << endl;
 	}
+}
+
+// Обработчик сигнала терминирования
+void dead_handler(int sig) {
+	cout << tdb_name << "receive (" << sig << "). Terminating..." << endl;
+	exit(0);
+}
+
+void startChronometer(){
+	pthread_t thread_id;
+	if ((pthread_create(&thread_id, NULL, &ChronometrService, NULL)) != EOK) {
+		cerr << tdb_name << ": error reg thread launch" << endl;
+		exit(EXIT_FAILURE);
+	};
 }
