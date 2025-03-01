@@ -64,11 +64,7 @@ int main(int argc, char* argv[]) {
 	tdb_name = "TDB_MS_plug_" + string(argv[1]);
 
 	cout << tdb_name << " starting..." << endl;
-	pthread_t thread_id;
-	if ((pthread_create(&thread_id, NULL, &ChronometrService, NULL)) != EOK) {
-		cerr << tdb_name << ": error reg thread launch" << endl;
-		exit(EXIT_FAILURE);
-	};
+	startChronometer();
 
 	while (!shutDown) {
 		int input;
