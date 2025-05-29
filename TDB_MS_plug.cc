@@ -59,18 +59,16 @@ private:
 	// Обработчик сигналов
 	static void signalHandler(int sig, siginfo_t* info, void* context) {
 
-		cout << "SIGNAL RECEIVE sig: " << sig << endl;
-
 		switch (sig) {
 		case SIG_TICK:
 			localTimerPtr->timeIncrease();
-			cout << tdbPtr->name_ << " Receive tick №"
+			cout << tdbPtr->name_ << " Получен тик №"
 					<< localTimerPtr->getTime() << endl;
 			break;
 
 		case SIG_TICK_MANUAL:
 			localTimerPtr->timeManualIncrease();
-			cout << tdbPtr->name_ << " Receive Manual tick №"
+			cout << tdbPtr->name_ << " Получен ручной тик №"
 					<< localTimerPtr->getTimeManual() << endl;
 			break;
 
@@ -86,9 +84,15 @@ private:
 			tdbPtr->stopChronometer();
 			break;
 		default:
-			cout << " Signal handler receive unknown signal: " << sig << endl;
+			cout << " Получен неизвестный сигнал: " << sig << endl;
 			break;
 		}
+	}
+
+	template<size_t N>
+	void stringToCharArray(const std::string& str, char(&dest)[N]) {
+		strncpy(dest, str.c_str(), N - 1);
+		dest[N - 1] = '\0';
 	}
 
 	void setupSignalHandlers() {
@@ -105,37 +109,31 @@ private:
 		sigaction(SIG_TERM, &sa, NULL);
 	}
 
-	template<size_t N>
-	void stringToCharArray(const std::string& str, char(&dest)[N]) {
-		strncpy(dest, str.c_str(), N - 1);
-		dest[N - 1] = '\0';
-	}
-
 	void* chronometerService() {
-		cout << "Registration: starting..." << endl;
+		cout << "ChronometerService: запуск..." << endl;
 
-		setupSignalHandlers();
 		localTimerPtr = new ChronTimer(0, 0, 0);
+		setupSignalHandlers();
 
 		if (ndParity_ == -1) {
 			cerr << name_ << " Parity determining error" << endl;
 			exit(EXIT_FAILURE);
 		}
 
-		if (ndParity_ == 0) {
-			int server_nd = netmgr_strtond(NODENAME1.c_str(), NULL);
-			if (server_nd == -1) {
-				cerr << "netmgr_strtond for server ND error, errno: " << errno
-						<< endl;
-				exit(EXIT_FAILURE);
-			}
-
-			int coid = ConnectAttach(server_nd, 0, 0, 0, 0);
-			if (coid == -1) {
-				cerr << "error ConnectAttach (errno: " << errno << ")" << endl;
-				exit(EXIT_FAILURE);
-			}
-		}
+//		if (ndParity_ == 0) {
+//			int server_nd = netmgr_strtond(NODENAME1.c_str(), NULL);
+//			if (server_nd == -1) {
+//				cerr << "netmgr_strtond for server ND error, errno: " << errno
+//						<< endl;
+//				exit(EXIT_FAILURE);
+//			}
+//
+//			int coid = ConnectAttach(server_nd, 0, 0, 0, 0);
+//			if (coid == -1) {
+//				cerr << "error ConnectAttach (errno: " << errno << ")" << endl;
+//				exit(EXIT_FAILURE);
+//			}
+//		}
 
 		if (!shouldShutdown_) {
 			int server_coid = sendRegistration();
@@ -156,7 +154,7 @@ private:
 	}
 
 	void printRegistrationInfo(const RegistrationMessage& msg) {
-		cout << endl << "Registration: ----msg--- " << endl;
+		cout << endl << "Данные СУБТД: ----msg--- " << endl;
 		cout << "Registration:  Name: " << msg.name << endl;
 		cout << "Registration:  PID : " << msg.pid << endl;
 		cout << "Registration:  TID : " << msg.tid << endl;
@@ -180,20 +178,20 @@ private:
 		while (server_coid == -1 && !shouldShutdown_) {
 			server_coid = name_open(REG_CHAN.c_str(), 0);
 			if (server_coid == -1) {
-				cerr << "Registration: error name_open(REG_CHAN) errno: "
+				cerr << "ChronometerService: error name_open(REG_CHAN) errno: "
 						<< errno << endl;
 				sleep(1);
 			}
 		}
 
-		cout << "Registration: sending registration data" << endl;
+		cout << "Registration: отправка данных для регистрации" << endl;
 		RegistrationMessage reply;
 		int status = MsgSend(server_coid, &msg, sizeof(msg), &reply,
 				sizeof(reply));
 
 		switch (status) {
 		case EOK:
-			cout << name_ << " Success registration" << endl;
+			cout << name_ << ": успешная регистрация" << endl;
 
 			localTimerPtr->updateTimer(reply.tick_nsec, reply.tick_sec,
 					reply.time);
@@ -202,10 +200,10 @@ private:
 			localTimerPtr->print();
 			break;
 		case EINVAL:
-			cout << name_ << " Registration error" << endl;
+			cout << name_ << " Ошибка регистрации" << endl;
 			break;
 		default:
-			cerr << name_ << " receive unknown reply status " << status
+			cerr << name_ << " получен неизвестный статус регистрации " << status
 					<< ". Error: " << strerror(errno);
 			break;
 		}
@@ -249,11 +247,11 @@ public:
 bool TDBMS::shouldShutdown_ = false;
 
 void showMenuList() {
-	cout << "0. Show menu list\n";
-	cout << "1. Start chronometer service\n";
-	cout << "2. Stop chronometer service\n";
-	cout << "3. Print LocalTimer info\n";
-	cout << "999. Shut down application\n";
+	cout << "0. Показать меню\n";
+	cout << "1. Запустить локальные часы\n";
+	cout << "2. Остановить локальный часы\n";
+	cout << "3. Показать текущее значение локальных часов\n";
+	cout << "999. Завершить работу\n";
 }
 
 void handleInput(int input) {
@@ -272,7 +270,7 @@ void handleInput(int input) {
 			cout << tdbPtr->getName() << " ";
 			localTimerPtr->print();
 		} else
-			cout << tdbPtr->getName() << " Timer doesen't exist." << endl;
+			cout << tdbPtr->getName() << " Локальные часы не инциализированы." << endl;
 		break;
 	case 999:
 		tdbPtr->shutdown();
@@ -286,15 +284,15 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	string tdbName = "TDB_MS_plug_" + string(argv[1]);
+	string tdbName = "TDB_MS_" + string(argv[1]);
 	TDBMS tdb(tdbName, atoi(argv[1]));
 
 	tdbPtr = &tdb;
 
-	cout << tdbName << " starting..." << endl;
+	cout << tdbName << " запуск..." << endl;
 	tdb.start();
 
-	cout << "Enter 0 to show menu list\n";
+	cout << "Введите 0 для отображения меню\n";
 
 	while (!tdb.shouldShutdown()) {
 		int input;
@@ -302,7 +300,7 @@ int main(int argc, char* argv[]) {
 		handleInput(input);
 	}
 
-	cout << tdb.getName() << " is shutting down" << endl;
+	cout << tdb.getName() << " завершение работы" << endl;
 
 	return EXIT_SUCCESS;
 }

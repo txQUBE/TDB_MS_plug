@@ -35,7 +35,7 @@ void ChronTimer::reset() {
 }
 
 void ChronTimer::print() const {
-    std::cout << "Timer: " << tick_sec << " sec "
-              << tick_nsec << " nsec | Time: " << time << std::endl
-              << "Manual tick count: " << timeManual << std::endl;
+    std::cout << "Timer: " << tick_sec << " сек "
+              << tick_nsec << " нсек | Количество тиков: " << time << std::endl
+              << "Количество ручных тиков: " << timeManual << std::endl;
 }
